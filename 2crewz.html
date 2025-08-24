@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>CREWZ GPS — Proto HUD GTA/NFS</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1"
+    />
+
+    <!-- Mapbox GL JS -->
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js"></script>
+
+    <!-- Geocoder -->
+    <link
+      rel="stylesheet"
+      href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.1.0/mapbox-gl-geocoder.css"
+    />
+    <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.1.0/mapbox-gl-geocoder.min.js"></script>
+
+    <!-- Turf -->
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <!-- Fuente -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      :root {
+        --bg: #0b0b0f;
+        --panel: rgba(12, 12, 18, 0.72);
+        --stroke: rgba(255, 255, 255, 0.1);
+        --txt: #fff;
+        --c-cyan: #39e1ff;
+        --c-lime: #7af15b;
+        --c-mag: #ff3b7f;
+        --c-amber: #ffc857;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--txt);
+        font-family: Inter, system-ui, Segoe UI, Roboto, sans-serif;
+      }
+      #map {
+        position: fixed;
+        inset: 0;
+      }
+      /* Controles superiores */
+      .topbar {
+        position: fixed;
+        z-index: 5;
+        left: 10px;
+        right: 10px;
+        top: 10px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .panel {
+        background: var(--panel);
+        backdrop-filter: blur(8px);
+        border: 1px solid var(--stroke);
+        border-radius: 14px;
+        padding: 8px 10px;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .btn {
+        appearance: none;
+        background: #141420;
+        border: 1px solid var(--stroke);
+        color: #fff;
+        border-radius: 12px;
+        padding: 9px 14px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        cursor: pointer;
+      }
+      .btn.primary {
+        background: linear-gradient(135deg, var(--c-mag), var(--c-cyan));
+        border: none;
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .toggle {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        font-size: 12px;
+        opacity: 0.9;
+      }
+      .mapboxgl-ctrl-geocoder {
+        min-width: 280px;
+        width: min(520px, 50vw);
+        background: transparent;
+      }
+      .mapboxgl-ctrl-geocoder--input {
+        color: #fff;
+      }
+      .mapboxgl-ctrl-geocoder .suggestions {
+        background: #0f0f17;
+        color: #fff;
+      }
+
+      /* Banner inferior */
+      .hud {
+        position: fixed;
+        z-index: 5;
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        display: flex;
+        gap: 10px;
+      }
+      .card {
+        flex: 1;
+        background: var(--panel);
+        border: 1px solid var(--stroke);
+        border-radius: 14px;
+        padding: 12px 14px;
+      }
+      .primary {
+        font-weight: 800;
+        font-size: 18px;
+        line-height: 1.2;
+        text-shadow: 0 0 12px rgba(57, 225, 255, 0.25), 0 1px 0 #000;
+      }
+      .meta {
+        margin-top: 6px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .badge {
+        font-size: 12px;
+        font-weight: 700;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--stroke);
+        background: #141420;
+      }
+      .badge.cyan {
+        background: rgba(57, 225, 255, 0.12);
+        border-color: rgba(57, 225, 255, 0.35);
+      }
+      .badge.lime {
+        background: rgba(122, 241, 91, 0.1);
+        border-color: rgba(122, 241, 91, 0.35);
+      }
+      .badge.amber {
+        background: rgba(255, 200, 87, 0.1);
+        border-color: rgba(255, 200, 87, 0.35);
+      }
+
+      /* Marcador coche (DOM marker) */
+      .car {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle at 50% 45%,
+          #fff 0 24%,
+          var(--c-cyan) 24% 60%,
+          transparent 60%
+        );
+        position: relative;
+        box-shadow: 0 0 12px rgba(57, 225, 255, 0.55);
+      }
+      .car:after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: -6px;
+        transform: translateX(-50%);
+        width: 6px;
+        height: 10px;
+        border-radius: 3px 3px 0 0;
+        background: var(--c-cyan);
+        box-shadow: 0 0 10px rgba(57, 225, 255, 0.7);
+      }
+      /* Destino pulsing */
+      .pulse {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--c-mag);
+        box-shadow: 0 0 14px rgba(255, 59, 127, 0.6);
+      }
+      .ring {
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        box-shadow: 0 0 0 0 rgba(255, 59, 127, 0.5);
+        animation: pulse 1.8s infinite;
+      }
+      @keyframes pulse {
+        to {
+          box-shadow: 0 0 0 16px transparent;
+        }
+      }
+
+      /* Gancho visual en ruta */
+      .legend {
+        position: fixed;
+        z-index: 4;
+        right: 12px;
+        bottom: 92px;
+        padding: 6px 10px;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(6px);
+        border: 1px solid var(--stroke);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <!-- Barra superior -->
+    <div class="topbar">
+      <div id="geocoder" class="panel"></div>
+      <div class="panel controls">
+        <button id="btnStart" class="btn primary">Iniciar</button>
+        <button id="btnStop" class="btn" disabled>Detener</button>
+        <button id="btnCenter" class="btn">Centrar</button>
+        <label class="toggle"
+          ><input type="checkbox" id="chkVoice" checked /> Voz</label
+        >
+        <label class="toggle"
+          ><input type="checkbox" id="chkSim" /> Simular</label
+        >
+      </div>
+    </div>
+
+    <!-- HUD inferior -->
+    <div class="hud">
+      <div class="card">
+        <div class="primary" id="primary">Elige destino o pulsa Iniciar</div>
+        <div class="meta">
+          <span class="badge cyan" id="eta">-- min</span>
+          <span class="badge lime" id="dist">-- km</span>
+          <span class="badge amber" id="speed">-- km/h</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      Ruta <span style="color: var(--c-cyan)">●</span> &nbsp; Progreso
+      <span style="color: var(--c-lime)">●</span>
+    </div>
+
+    <script>
+      // ===== CONFIG =====
+      mapboxgl.accessToken =
+        "pk.eyJ1IjoiY3Jld3phZG1pbiIsImEiOiJjbWVvdndxbHIwZWRyMmpxem9rb3l3b28zIn0.BiFAGqbjJ1bafh1UeUb0Pg";
+      const STYLE = "mapbox://styles/crewzadmin/cmepx1axn008s01qwd7boaagv";
+      const DEFAULT_CENTER = [-3.7038, 40.4168]; // Madrid
+      const REROUTE_M = 50;
+      const STEP_ANNOUNCE_M = 120;
+      const FOLLOW_ZOOM = 16.5;
+      const FOLLOW_PITCH = 60;
+
+      // ===== ESTADO =====
+      let map, geocoder, geolocate;
+      let user = null; // {lng,lat,heading?,speed?}
+      let dest = null; // [lng,lat]
+      let navOn = false;
+      let route = null; // route obj
+      let routeLine = null; // LineString
+      let stepIdx = 0;
+      let simTimer = null;
+      let voiceOn = true;
+      let userMarker, destMarker;
+
+      // ===== INICIO MAPA =====
+      map = new mapboxgl.Map({
+        container: "map",
+        style: STYLE,
+        center: DEFAULT_CENTER,
+        zoom: 13,
+        pitch: FOLLOW_PITCH,
+      });
+      map.addControl(new mapboxgl.NavigationControl(), "top-right");
+
+      geolocate = new mapboxgl.GeolocateControl({
+        positionOptions: { enableHighAccuracy: true, timeout: 10000 },
+        trackUserLocation: true,
+        showUserHeading: true,
+      });
+      map.addControl(geolocate, "top-left");
+
+      geocoder = new MapboxGeocoder({
+        accessToken: mapboxgl.accessToken,
+        mapboxgl,
+        marker: false,
+        language: "es",
+        countries: "es,pt,fr,ad",
+        placeholder: "Buscar destino…",
+        proximity: "ip",
+      });
+      document.getElementById("geocoder").appendChild(geocoder.onAdd(map));
+
+      map.on("load", () => {
+        // Fuentes/capas de ruta y progreso
+        map.addSource("route", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+        map.addSource("progress", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
+        map.addLayer({
+          id: "route-casing",
+          type: "line",
+          source: "route",
+          paint: {
+            "line-color": "#05050A",
+            "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              10,
+              6,
+              16,
+              12,
+              20,
+              18,
+            ],
+            "line-opacity": 0.85,
+          },
+          layout: { "line-cap": "round", "line-join": "round" },
+        });
+        map.addLayer({
+          id: "route-line",
+          type: "line",
+          source: "route",
+          paint: {
+            "line-color": "#39E1FF",
+            "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              10,
+              4,
+              16,
+              8,
+              20,
+              14,
+            ],
+          },
+          layout: { "line-cap": "round", "line-join": "round" },
+        });
+        map.addLayer({
+          id: "route-progress",
+          type: "line",
+          source: "progress",
+          paint: {
+            "line-color": "#7AF15B",
+            "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              10,
+              4,
+              16,
+              8,
+              20,
+              14,
+            ],
+          },
+          layout: { "line-cap": "round", "line-join": "round" },
+        });
+
+        // Marcador usuario (DOM)
+        const el = document.createElement("div");
+        el.className = "car";
+        userMarker = new mapboxgl.Marker({
+          element: el,
+          rotationAlignment: "map",
+        })
+          .setLngLat(DEFAULT_CENTER)
+          .addTo(map);
+
+        // Pedir ubicación
+        geolocate.trigger();
+      });
+
+      // ===== UI =====
+      const setPrimary = (t) =>
+        (document.getElementById("primary").textContent = t || "");
+      const setBadges = ({ etaMin, distKm, speedKmh }) => {
+        if (etaMin != null)
+          document.getElementById("eta").textContent = `${Math.round(
+            etaMin
+          )} min`;
+        if (distKm != null)
+          document.getElementById("dist").textContent = `${distKm.toFixed(
+            1
+          )} km`;
+        if (speedKmh != null)
+          document.getElementById("speed").textContent = `${Math.round(
+            speedKmh
+          )} km/h`;
+      };
+      const speak = (t) => {
+        if (!voiceOn) return;
+        try {
+          const u = new SpeechSynthesisUtterance(t);
+          u.lang = "es-ES";
+          u.rate = 1;
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(u);
+        } catch (e) {}
+      };
+
+      // ===== GEO =====
+      geolocate.on("geolocate", (p) => {
+        const { longitude: lng, latitude: lat, heading, speed } = p.coords;
+        user = { lng, lat, heading, speed };
+        // rotación del marcador con heading (si existe)
+        const rot = Number.isFinite(heading) ? heading : map.getBearing();
+        userMarker.setLngLat([lng, lat]);
+        userMarker.setRotation(rot);
+        if (navOn)
+          map.easeTo({
+            center: [lng, lat],
+            bearing: rot,
+            pitch: FOLLOW_PITCH,
+            zoom: FOLLOW_ZOOM,
+            duration: 500,
+          });
+        updateProgress();
+      });
+
+      geocoder.on("result", (e) => {
+        dest = e.result.center;
+        setPrimary("Destino elegido. Pulsa Iniciar.");
+        // pinta marcador de destino con pulso
+        if (destMarker) destMarker.remove();
+        const n = document.createElement("div");
+        n.style.position = "relative";
+        const a = document.createElement("div");
+        a.className = "pulse";
+        const r = document.createElement("div");
+        r.className = "ring";
+        n.appendChild(a);
+        n.appendChild(r);
+        destMarker = new mapboxgl.Marker({ element: n })
+          .setLngLat(dest)
+          .addTo(map);
+      });
+      geocoder.on("clear", () => {
+        dest = null;
+        if (destMarker) {
+          destMarker.remove();
+          destMarker = null;
+        }
+      });
+
+      // ===== ROUTING =====
+      async function fetchRoute(start, end, heading) {
+        const base =
+          "https://api.mapbox.com/directions/v5/mapbox/driving-traffic";
+        const coords = `${start[0]},${start[1]};${end[0]},${end[1]}`;
+        const params = new URLSearchParams({
+          access_token: mapboxgl.accessToken,
+          alternatives: "true",
+          geometries: "geojson",
+          steps: "true",
+          overview: "full",
+          annotations: "distance,duration,congestion",
+          language: "es",
+          banner_instructions: "true",
+          voice_instructions: "true",
+          voice_units: "metric",
+          roundabout_exits: "true",
+        });
+        if (Number.isFinite(heading))
+          params.set("bearings", `${Math.round(heading)},45;`);
+        const url = `${base}/${coords}?${params.toString()}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (!json.routes?.length) throw new Error("Sin rutas");
+        json.routes.sort((a, b) => a.duration - b.duration);
+        return json.routes[0];
+      }
+
+      function drawRoute(r) {
+        route = r;
+        routeLine = turf.lineString(r.geometry.coordinates);
+        stepIdx = 0;
+
+        map
+          .getSource("route")
+          .setData({
+            type: "FeatureCollection",
+            features: [{ type: "Feature", geometry: routeLine.geometry }],
+          });
+        map
+          .getSource("progress")
+          .setData({ type: "FeatureCollection", features: [] });
+
+        const distKm = r.distance / 1000;
+        const etaMin = r.duration / 60;
+        setBadges({ etaMin, distKm });
+
+        const first =
+          r.legs[0].steps[0]?.bannerInstructions?.[0]?.primary?.text;
+        if (first) {
+          setPrimary(first);
+          speak(first);
+        } else {
+          setPrimary("Ruta lista. ¡Vamos!");
+          speak("Ruta lista. Vamos");
+        }
+
+        // encuadre
+        const b = r.geometry.coordinates.reduce(
+          (acc, c) => acc.extend(c),
+          new mapboxgl.LngLatBounds(
+            r.geometry.coordinates[0],
+            r.geometry.coordinates[0]
+          )
+        );
+        map.fitBounds(b, {
+          padding: { top: 140, bottom: 160, left: 40, right: 40 },
+          maxZoom: 17,
+          duration: 700,
+        });
+      }
+
+      function updateProgress() {
+        if (!route || !routeLine || !user) return;
+
+        const pt = turf.point([user.lng, user.lat]);
+        const distTo = turf.pointToLineDistance(pt, routeLine, {
+          units: "meters",
+        });
+
+        // re-ruta
+        if (navOn && dest && distTo > REROUTE_M) {
+          startNav();
+          return;
+        }
+
+        // progreso (slice)
+        const snapped = turf.nearestPointOnLine(routeLine, pt, {
+          units: "meters",
+        });
+        const sliced = turf.lineSlice(
+          routeLine.geometry.coordinates[0],
+          snapped,
+          routeLine
+        );
+        map
+          .getSource("progress")
+          .setData({ type: "FeatureCollection", features: [sliced] });
+
+        // badges velocidad
+        const speedKmh =
+          user.speed != null ? Math.max(0, user.speed) * 3.6 : null;
+        setBadges({ speedKmh });
+
+        // instrucción siguiente
+        const steps = route.legs[0].steps;
+        const next = steps[stepIdx];
+        if (next) {
+          const d = turf.distance(pt, turf.point(next.maneuver.location), {
+            units: "meters",
+          });
+          if (d < 25) {
+            // step completado
+            stepIdx = Math.min(stepIdx + 1, steps.length - 1);
+            const banner =
+              steps[stepIdx]?.bannerInstructions?.[0]?.primary?.text;
+            if (banner) {
+              setPrimary(banner);
+              speak(banner);
+            }
+          } else if (d < STEP_ANNOUNCE_M) {
+            const banner = next.bannerInstructions?.[0]?.primary?.text;
+            if (banner) setPrimary(`${banner} (${Math.round(d)} m)`);
+          }
+        }
+      }
+
+      async function startNav() {
+        if (!user || !dest) {
+          setPrimary("Activa ubicación y elige destino.");
+          return;
+        }
+        navOn = true;
+        document.getElementById("btnStart").disabled = true;
+        document.getElementById("btnStop").disabled = false;
+
+        try {
+          const r = await fetchRoute([user.lng, user.lat], dest, user.heading);
+          drawRoute(r);
+          if (document.getElementById("chkSim").checked) startSim();
+        } catch (e) {
+          console.error(e);
+          setPrimary("No se pudo calcular la ruta. Revisa token/estilo.");
+        }
+      }
+
+      function stopNav() {
+        navOn = false;
+        stopSim();
+        setPrimary("Navegación detenida");
+        document.getElementById("btnStart").disabled = false;
+        document.getElementById("btnStop").disabled = true;
+        if (map.getSource("route"))
+          map
+            .getSource("route")
+            .setData({ type: "FeatureCollection", features: [] });
+        if (map.getSource("progress"))
+          map
+            .getSource("progress")
+            .setData({ type: "FeatureCollection", features: [] });
+      }
+
+      // ===== SIMULACIÓN =====
+      function startSim() {
+        stopSim();
+        if (!route) return;
+        const coords = route.geometry.coordinates;
+        let i = 0;
+        simTimer = setInterval(() => {
+          if (i >= coords.length - 1) {
+            stopSim();
+            return;
+          }
+          const [lng, lat] = coords[i];
+          const [lng2, lat2] = coords[i + 1];
+          const bearing = turf.bearing(
+            turf.point([lng, lat]),
+            turf.point([lng2, lat2])
+          );
+          i += 3; // ~50 km/h aprox
+          user = { lng, lat, heading: bearing, speed: 14 };
+          userMarker.setLngLat([lng, lat]);
+          userMarker.setRotation(bearing);
+          map.easeTo({
+            center: [lng, lat],
+            bearing,
+            pitch: FOLLOW_PITCH,
+            zoom: FOLLOW_ZOOM,
+            duration: 320,
+          });
+          updateProgress();
+        }, 380);
+      }
+      function stopSim() {
+        if (simTimer) {
+          clearInterval(simTimer);
+          simTimer = null;
+        }
+      }
+
+      // ===== EVENTOS UI =====
+      document.getElementById("btnStart").addEventListener("click", startNav);
+      document.getElementById("btnStop").addEventListener("click", stopNav);
+      document.getElementById("btnCenter").addEventListener("click", () => {
+        if (user)
+          map.easeTo({
+            center: [user.lng, user.lat],
+            zoom: FOLLOW_ZOOM,
+            pitch: FOLLOW_PITCH,
+            duration: 400,
+          });
+        else geolocate.trigger();
+      });
+      document.getElementById("chkVoice").addEventListener("change", (e) => {
+        voiceOn = e.target.checked;
+      });
+      document.getElementById("chkSim").addEventListener("change", (e) => {
+        if (navOn) e.target.checked ? startSim() : stopSim();
+      });
+
+      // Fallback de estilo si falla tu estilo
+      map.on("error", (e) => {
+        const msg = e?.error?.message || "";
+        if (msg.includes("style") || msg.includes("Unauthorized")) {
+          console.warn("Fallo de estilo. Cargando fallback dark-v11.");
+          map.setStyle("mapbox://styles/mapbox/dark-v11");
+        }
+      });
+    </script>
+  </body>
+</html>
